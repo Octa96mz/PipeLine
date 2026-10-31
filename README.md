@@ -3,8 +3,7 @@
 Read-only market prices and sparklines for the Omarchy top bar.
 
 **Status: early development.** Crypto prices can be fetched and inspected from the command line.
-Indices and stocks have no data provider yet and are reported as `unavailable`. Installation
-instructions will be added with `install.sh`.
+Indices and stocks have no data provider yet and are reported as `unavailable`.
 
 This project is not financial advice and is not affiliated with any data provider.
 
@@ -43,6 +42,20 @@ pipeline show              # prices and sparklines in the terminal
 pipeline json              # data for the bar; see docs/json-schema.md
 ```
 
+## Installation
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install .
+./install.sh --dry-run    # shows every change without making it
+./install.sh
+omarchy restart shell
+```
+
+`install.sh` needs no root. It asks before replacing anything, and before enabling the timer or
+changing `shell.json`, which it does with a dated copy after showing the diff. `./uninstall.sh`
+removes what it installed and asks before deleting your data or configuration.
+
 ## Scheduled collection
 
 `systemd/` has a user timer that runs `pipeline fetch --scheduled` every 5 minutes. The service only
@@ -50,8 +63,7 @@ calls the provider when its interval has passed, and it respects any 429 pause a
 network failures. Having no network is not a service failure: the data just goes stale.
 
 The units depend on the launcher `~/.local/bin/pipeline`. `~/.local/share/pipeline` must exist before
-the service starts, and the future `install.sh` must create it. The timer runs only while your user
-session is active.
+the service starts; `install.sh` creates both. The timer runs only while your user session is active.
 
 If you use a VPN kill switch with a captive portal mode that opens DNS and ports 80 and 443, such as
 `wifi-publica portal`, a timer run during that time could reach CoinGecko outside the tunnel. To
@@ -72,7 +84,7 @@ The panel's "Actualizar" button never contacts a provider itself. It runs `syste
 on the collector service, which calls only if its interval has passed and respects any 429 pause and
 backoff, so pressing it often has no effect on the calls made.
 
-By default it runs `~/.local/bin/pipeline`, a launcher created by `scripts/install-launcher.sh`. A
+By default it runs `~/.local/bin/pipeline`, a launcher created by `install.sh`. A
 `command` setting on its entry in `shell.json` overrides that, and `refreshSeconds` (default 60,
 minimum 15) sets how often it reads.
 
@@ -112,6 +124,8 @@ python3 -m venv .venv
   including no network, 429 pauses and backoff. A real VPN kill switch has not been tested: its
   effect was only simulated, with the errors it would produce.
 - Behaviour on a shared VPN address that receives HTTP 429 has not been observed.
+- `install.sh` and `uninstall.sh` were tested only in a temporary `HOME` with simulated `systemctl`
+  and `omarchy`, and only with `bash` as `/bin/sh`. They use GNU `diff` and `stat`.
 - `AF_NETLINK` stays allowed in the service because it could not be shown to be unnecessary for name
   resolution without making real requests.
 - The plugin uses `qs.Ui` and `KeyboardPanel` from the Omarchy shell. They load correctly from
@@ -128,7 +142,6 @@ python3 -m venv .venv
 
 - `wifi-publica portal` should stop the timer and start it again afterwards, or this project should
   document that step.
-- `install.sh` must create `~/.local/share/pipeline` and the launcher.
 - CI must install Node.js and fail if the `plugin/Model.js` tests are skipped. They are skipped
   locally when Node.js is missing, which would otherwise hide a failure in CI.
 - README screenshots must use synthetic data and show only the panel, cropped so that no real bar or

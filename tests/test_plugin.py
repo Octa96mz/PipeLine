@@ -154,84 +154,19 @@ def test_no_result_yet_is_handled():
     assert model("tooltip", None) == "PipeLine: cargando"
 
 
-def make_repository(tmp_path, name="repo"):
-    root = tmp_path / name
-    (root / "scripts").mkdir(parents=True)
-    shutil.copy(REPOSITORY / "scripts/install-launcher.sh", root / "scripts")
-    venv_bin = root / ".venv/bin"
-    venv_bin.mkdir(parents=True)
-    target = venv_bin / "pipeline"
-    target.write_text('#!/bin/sh\necho "args:$*"\n', encoding="utf-8")
-    target.chmod(0o755)
-    return root, target
-
-
-def run_installer(root, home):
-    return subprocess.run(
-        ["/bin/sh", str(root / "scripts/install-launcher.sh")],
-        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-
-
-def test_launcher_is_only_an_exec_to_the_venv(tmp_path):
-    root, target = make_repository(tmp_path)
-    home = tmp_path / "home"
-    result = run_installer(root, home)
-    assert result.returncode == 0, result.stderr
-    launcher = home / ".local/bin/pipeline"
-    assert launcher.read_text(encoding="utf-8") == f'#!/bin/sh\nexec {target.resolve()} "$@"\n'
-    assert launcher.stat().st_mode & 0o777 == 0o755
-    assert [item.name for item in launcher.parent.iterdir()] == ["pipeline"]
-    run = subprocess.run(
-        [str(launcher), "json", "--pretty"],
-        env={},
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=True,
-    )
-    assert run.stdout == "args:json --pretty\n"
-
-
-def test_launcher_never_overwrites(tmp_path):
-    root, _ = make_repository(tmp_path)
-    home = tmp_path / "home"
-    launcher = home / ".local/bin/pipeline"
-    launcher.parent.mkdir(parents=True)
-    launcher.write_text("existing", encoding="utf-8")
-    result = run_installer(root, home)
-    assert result.returncode == 1
-    assert "no se toca" in result.stderr
-    assert launcher.read_text(encoding="utf-8") == "existing"
-    assert [item.name for item in launcher.parent.iterdir()] == ["pipeline"]
-
-
-def test_launcher_requires_the_venv(tmp_path):
-    root, target = make_repository(tmp_path)
-    target.unlink()
-    home = tmp_path / "home"
-    result = run_installer(root, home)
-    assert result.returncode == 1
-    assert not (home / ".local/bin/pipeline").exists()
-
-
-def test_launcher_refuses_unsafe_paths(tmp_path):
-    root, _ = make_repository(tmp_path, name="repo with space")
-    home = tmp_path / "home"
-    result = run_installer(root, home)
-    assert result.returncode == 1
-    assert "no admitidos" in result.stderr
-    assert not (home / ".local/bin/pipeline").exists()
-
-
 def test_repository_has_no_personal_paths():
     checked = [REPOSITORY / name for name in ("src", "plugin", "scripts", "docs", "systemd")]
     files = [path for folder in checked for path in folder.rglob("*") if path.is_file()]
-    files += [REPOSITORY / name for name in ("README.md", "config.example.toml", "pyproject.toml")]
+    files += [
+        REPOSITORY / name
+        for name in (
+            "README.md",
+            "config.example.toml",
+            "pyproject.toml",
+            "install.sh",
+            "uninstall.sh",
+        )
+    ]
     for path in files:
         if path.suffix == ".pyc":
             continue

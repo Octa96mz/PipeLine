@@ -1,7 +1,9 @@
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from pipeline.http import HttpClient
+# Solo para anotaciones: los lectores importan este módulo y no deben cargar código de red.
+if TYPE_CHECKING:
+    from pipeline.http import HttpClient
 
 
 @dataclass(frozen=True)

@@ -1,3 +1,7 @@
+import errno
+import http.client
+import socket
+import ssl
 import urllib.error
 from email.utils import formatdate
 
@@ -40,13 +44,104 @@ def test_success_uses_the_configured_timeout():
     assert sleeps == []
 
 
-def test_network_failures_retry_with_backoff_and_count_every_call():
-    failure = urllib.error.URLError("unreachable")
+def test_network_failures_retry_with_backoff():
+    failure = urllib.error.URLError(socket.gaierror("no name"))
     client, calls, sleeps = make_client(FakeOpener(failure, failure, failure, failure))
     with pytest.raises(NetworkError):
         client.get_json(URL)
-    assert len(calls) == 4
+    assert calls == []
     assert sleeps == [1, 2, 4]
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        socket.gaierror(socket.EAI_NONAME, "Name or service not known"),
+        ConnectionRefusedError(errno.ECONNREFUSED, "refused"),
+        OSError(errno.ENETUNREACH, "Network is unreachable"),
+        OSError(errno.EHOSTUNREACH, "No route to host"),
+        OSError(errno.EPERM, "Operation not permitted"),
+        TimeoutError("connect timed out"),
+        ssl.SSLCertVerificationError("certificate verify failed"),
+    ],
+)
+def test_failures_before_sending_are_not_counted(reason):
+    client, calls, _ = make_client(FakeOpener(urllib.error.URLError(reason)), max_retries=0)
+    with pytest.raises(NetworkError):
+        client.get_json(URL)
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        TimeoutError("read timed out"),
+        ConnectionResetError(errno.ECONNRESET, "reset by peer"),
+        http.client.RemoteDisconnected("closed without response"),
+        http.client.IncompleteRead(b""),
+        # Motivo desconocido: se cuenta para no quedarse corto con una cuota.
+        urllib.error.URLError("unknown"),
+        urllib.error.URLError(BrokenPipeError(errno.EPIPE, "broken pipe")),
+    ],
+)
+def test_failures_after_sending_are_counted(failure):
+    client, calls, _ = make_client(FakeOpener(failure), max_retries=0)
+    with pytest.raises(NetworkError):
+        client.get_json(URL)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("code", [400, 404, 429, 500, 503])
+def test_every_http_response_is_counted(code):
+    client, calls, _ = make_client(FakeOpener(http_error(code)), max_retries=0)
+    with pytest.raises(ProviderError):
+        client.get_json(URL)
+    assert len(calls) == 1
+
+
+def real_client(monkeypatch):
+    # Sin FakeOpener: comprueba las excepciones que da urllib de verdad, sin tocar la red.
+    monkeypatch.delenv("https_proxy", raising=False)
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    calls = []
+    client = HttpClient(on_request=lambda: calls.append(1), timeout=1, max_retries=0)
+    return client, calls
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        socket.gaierror(socket.EAI_NONAME, "Name or service not known"),
+        ConnectionRefusedError(errno.ECONNREFUSED, "refused"),
+        OSError(errno.ENETUNREACH, "Network is unreachable"),
+        TimeoutError("connect timed out"),
+    ],
+)
+def test_real_urllib_connection_failures_are_not_counted(monkeypatch, failure):
+    def fail(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setattr(socket, "create_connection", fail)
+    client, calls = real_client(monkeypatch)
+    with pytest.raises(NetworkError):
+        client.get_json(URL)
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [TimeoutError("read timed out"), http.client.RemoteDisconnected("closed without response")],
+)
+def test_real_urllib_failure_waiting_for_the_response_is_counted(monkeypatch, failure):
+    def fail(_self):
+        raise failure
+
+    monkeypatch.setattr(http.client.HTTPSConnection, "request", lambda *_a, **_k: None)
+    monkeypatch.setattr(http.client.HTTPSConnection, "getresponse", fail)
+    client, calls = real_client(monkeypatch)
+    with pytest.raises(NetworkError):
+        client.get_json(URL)
+    assert len(calls) == 1
 
 
 def test_timeout_is_a_network_failure():

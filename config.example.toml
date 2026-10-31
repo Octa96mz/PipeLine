@@ -13,6 +13,7 @@ stocks = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
 
 [collector]
 crypto_interval_minutes = 5
+max_offline_interval_minutes = 20   # tope entre pasadas tras fallos de red seguidos
 request_timeout_seconds = 10
 max_retries = 3
 eodhd_daily_call_budget = 18    # tope propio; el plan gratuito de EODHD admite 20 al día

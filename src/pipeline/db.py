@@ -72,6 +72,15 @@ _MIGRATIONS = (
         cooldown_until INTEGER NOT NULL
     ) STRICT;
     """,
+    """
+    CREATE TABLE held_quotes (
+        symbol         TEXT PRIMARY KEY REFERENCES quotes(symbol) ON DELETE CASCADE,
+        rejected_price REAL NOT NULL,
+        jump_percent   REAL NOT NULL,
+        since          INTEGER NOT NULL,
+        last_seen      INTEGER NOT NULL
+    ) STRICT;
+    """,
 )
 
 
@@ -87,6 +96,17 @@ class Quote:
     kind: str
     price_time: int
     fetched_at: int
+
+
+@dataclass(frozen=True)
+class HeldQuote:
+    """Precio recibido que no se aplica porque supone un salto respecto al último válido."""
+
+    symbol: str
+    rejected_price: float
+    jump_percent: float
+    since: int
+    last_seen: int
 
 
 @dataclass(frozen=True)
@@ -206,6 +226,7 @@ class Database:
                     quote.fetched_at,
                 ),
             )
+            self._connection.execute("DELETE FROM held_quotes WHERE symbol = ?", (quote.symbol,))
             self._connection.execute("DELETE FROM series_points WHERE symbol = ?", (quote.symbol,))
             self._connection.executemany(
                 "INSERT INTO series_points (symbol, ts, value) VALUES (?, ?, ?)",
@@ -229,8 +250,32 @@ class Database:
         )
         return [(ts, value) for ts, value in rows]
 
+    def hold_quote(self, symbol: str, rejected_price: float, jump_percent: float, now: int) -> None:
+        """Anota la retención. `since` conserva cuándo empezó, aunque se repita en cada pasada."""
+        self._connection.execute(
+            """
+            INSERT INTO held_quotes (symbol, rejected_price, jump_percent, since, last_seen)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (symbol) DO UPDATE SET
+                rejected_price = excluded.rejected_price,
+                jump_percent = excluded.jump_percent,
+                last_seen = excluded.last_seen
+            """,
+            (symbol, rejected_price, jump_percent, now, now),
+        )
+
+    def held_quote(self, symbol: str) -> HeldQuote | None:
+        row = self._connection.execute(
+            """
+            SELECT symbol, rejected_price, jump_percent, since, last_seen
+            FROM held_quotes WHERE symbol = ?
+            """,
+            (symbol,),
+        ).fetchone()
+        return HeldQuote(*row) if row else None
+
     def record_api_call(self, provider: str, called_at: int) -> None:
-        """Anota una llamada antes de enviarla: las fallidas también pueden consumir cuota."""
+        """Anota una petición que pudo llegar al servidor."""
         self._connection.execute(
             "INSERT INTO api_calls (provider, called_at) VALUES (?, ?)", (provider, called_at)
         )
@@ -282,6 +327,22 @@ class Database:
         with self._transaction():
             self._connection.execute("DELETE FROM api_calls WHERE called_at < ?", (cutoff,))
             self._connection.execute("DELETE FROM fetch_attempts WHERE finished_at < ?", (cutoff,))
+
+    def offline_streak(self, provider: str) -> int:
+        """Pasadas seguidas sin conexión, contando desde la última hacia atrás."""
+        rows = self._connection.execute(
+            """
+            SELECT outcome FROM fetch_attempts
+            WHERE provider = ? ORDER BY finished_at DESC, id DESC LIMIT 32
+            """,
+            (provider,),
+        )
+        streak = 0
+        for (outcome,) in rows:
+            if outcome != "offline":
+                break
+            streak += 1
+        return streak
 
     def last_attempt(self, provider: str) -> FetchAttempt | None:
         row = self._connection.execute(

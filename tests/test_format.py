@@ -4,9 +4,11 @@ from pipeline.format import (
     NBSP,
     format_age,
     format_clock,
+    format_compact,
     format_number,
     format_percent,
     format_price,
+    format_sparkline,
 )
 
 
@@ -68,3 +70,27 @@ def test_format_clock_uses_the_configured_timezone():
     assert format_clock(1_782_907_200, "Europe/Madrid") == "14:00"
     # 2026-01-15 12:00 UTC: invierno en Madrid (UTC+1).
     assert format_clock(1_768_478_400, "Europe/Madrid") == "13:00"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(77386.4, "77.386"), (7744.2, "7744"), (100.4, "100"), (99.5, "99,50"), (1.25, "1,25")],
+)
+def test_format_compact(value, expected):
+    assert format_compact(value) == expected
+
+
+def test_format_sparkline_maps_low_to_high():
+    assert format_sparkline([1.0, 2.0, 3.0]) == "▁▅█"
+
+
+def test_format_sparkline_handles_flat_and_empty_series():
+    assert format_sparkline([5.0, 5.0]) == "▅▅"
+    assert format_sparkline([]) == ""
+
+
+def test_format_sparkline_respects_the_width_and_keeps_the_ends():
+    values = [float(index) for index in range(100)]
+    line = format_sparkline(values, width=10)
+    assert len(line) == 10
+    assert (line[0], line[-1]) == ("▁", "█")

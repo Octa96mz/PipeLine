@@ -42,7 +42,7 @@ def test_migrations_run_once(path):
     with Database.open(path) as first:
         version = first.schema_version()
         first.save_snapshot(make_quote(), [])
-    assert version == 2
+    assert version == 3
     with Database.open(path) as second:
         assert second.schema_version() == version
         assert second.quote("BTC") == make_quote()
@@ -156,7 +156,7 @@ def test_readonly_handles_paths_with_special_characters(tmp_path):
     path = tmp_path / "dir with spaces?#" / "pipeline.db"
     Database.open(path).close()
     with Database.open_readonly(path) as reader:
-        assert reader.schema_version() == 2
+        assert reader.schema_version() == 3
 
 
 def test_upgrade_from_v1_keeps_attempts_and_allows_new_outcomes(path, monkeypatch):
@@ -169,7 +169,7 @@ def test_upgrade_from_v1_keeps_attempts_and_allows_new_outcomes(path, monkeypatc
             with pytest.raises(sqlite3.IntegrityError):
                 old.record_attempt("synthetic", 11, "offline")
     with Database.open(path) as upgraded:
-        assert upgraded.schema_version() == 2
+        assert upgraded.schema_version() == 3
         assert upgraded.last_attempt("synthetic").detail == "old"
         upgraded.record_attempt("synthetic", 12, "offline")
         upgraded.record_attempt("synthetic", 13, "rate_limited")
@@ -209,3 +209,36 @@ def test_corrupt_file_is_reported(path):
     path.write_bytes(b"this is not a sqlite database, only synthetic bytes" * 100)
     with pytest.raises(DatabaseError):
         Database.open(path)
+
+
+def test_hold_keeps_its_start_and_clears_when_a_price_is_accepted(database):
+    database.save_snapshot(make_quote(), [])
+    database.hold_quote("BTC", 500.0, 400.0, 100)
+    database.hold_quote("BTC", 600.0, 500.0, 200)
+    held = database.held_quote("BTC")
+    assert (held.rejected_price, held.jump_percent, held.since, held.last_seen) == (
+        600.0,
+        500.0,
+        100,
+        200,
+    )
+    database.save_snapshot(make_quote(price=600.0), [])
+    assert database.held_quote("BTC") is None
+
+
+def test_hold_disappears_with_its_expired_quote(database):
+    database.save_snapshot(make_quote(fetched_at=100), [])
+    database.hold_quote("BTC", 500.0, 400.0, 100)
+    database.delete_quotes_older_than("synthetic", 200)
+    assert database.held_quote("BTC") is None
+
+
+def test_offline_streak_counts_only_the_latest_run(database):
+    assert database.offline_streak("synthetic") == 0
+    database.record_attempt("synthetic", 1, "offline")
+    database.record_attempt("synthetic", 2, "ok")
+    database.record_attempt("synthetic", 3, "offline")
+    database.record_attempt("synthetic", 4, "offline")
+    assert database.offline_streak("synthetic") == 2
+    database.record_attempt("synthetic", 5, "ok")
+    assert database.offline_streak("synthetic") == 0

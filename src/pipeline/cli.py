@@ -1,29 +1,24 @@
 import argparse
 import getpass
+import json
 import sqlite3
 import sys
 import time
 import warnings
 from collections.abc import Sequence
+from typing import Any
 
 from pipeline import __version__, keystore, paths
-from pipeline.collector import active_cooldown, fetch_lock, make_client, run_fetch
-from pipeline.config import load_config
+from pipeline.config import Config, load_config
 from pipeline.db import Database
 from pipeline.errors import PipelineError
-from pipeline.format import format_age, format_clock, format_percent, format_price
-from pipeline.freshness import EXPIRED, STALE, freshness
+from pipeline.format import format_clock, format_sparkline
 from pipeline.providers import CRYPTO_PROVIDER
-from pipeline.redact import setup_logging
+from pipeline.redact import redact_text, setup_logging
+from pipeline.report import build_report, error_report
+from pipeline.schedule import active_cooldown
 
 DAY_SECONDS = 86_400
-_OUTCOME_LABELS = {
-    "ok": "correcto",
-    "partial": "parcial",
-    "rate_limited": "limitado por el proveedor (429)",
-    "offline": "sin conexión",
-    "error": "error",
-}
 
 
 def _now() -> int:
@@ -77,7 +72,7 @@ def _dry_run(symbols: tuple[str, ...], max_retries: int, timezone: str) -> int:
     if paths.database_path().exists():
         with Database.open_readonly(paths.database_path()) as database:
             calls = database.calls_since(provider.name, now - DAY_SECONDS)
-            until = active_cooldown(database, provider, now)
+            until = active_cooldown(database, provider.name, now)
     print(_plan_text(symbols, max_retries, calls))
     if until is not None:
         print(f"Ahora no se llamaría: en pausa por 429 hasta las {format_clock(until, timezone)}.")
@@ -99,6 +94,9 @@ class _Declined(Exception):
 
 
 def _fetch(args: argparse.Namespace) -> int:
+    # Import diferido: los comandos de lectura no deben cargar el código de red.
+    from pipeline.collector import fetch_lock, make_client, run_fetch
+
     config = load_config(paths.config_path())
     provider = CRYPTO_PROVIDER
     symbols = config.assets.crypto
@@ -114,7 +112,8 @@ def _fetch(args: argparse.Namespace) -> int:
         fetch_lock(paths.data_dir() / "fetch.lock"),
         Database.open(paths.database_path()) as database,
     ):
-        if not args.scheduled and not args.yes and active_cooldown(database, provider, now) is None:
+        cooling = active_cooldown(database, provider.name, now) is not None
+        if not args.scheduled and not args.yes and not cooling:
             calls = database.calls_since(provider.name, now - DAY_SECONDS)
             try:
                 _confirm(_plan_text(symbols, config.collector.max_retries, calls))
@@ -141,58 +140,93 @@ def _fetch(args: argparse.Namespace) -> int:
     return 0
 
 
-def _quote_line(symbol, database, attempt, config, now) -> str:
-    quote = database.quote(symbol) if database else None
-    state = None
-    if quote is not None:
-        state = freshness(
-            quote,
-            now,
-            config.validation.stale_after_minutes * 60,
-            CRYPTO_PROVIDER.retention_seconds,
-            attempt,
-        )
-    if quote is None or state == EXPIRED:
-        return f"  {symbol:<6} sin datos"
-    change = "" if quote.change_percent is None else format_percent(quote.change_percent)
-    age = format_age(now - quote.price_time)
-    marker = "  obsoleto" if state == STALE else ""
-    return (
-        f"  {symbol:<6} {format_price(quote.price, quote.currency):>14} {change:>10}  {age}{marker}"
-    )
+def _load_report(config: Config, now: int) -> dict[str, Any]:
+    if not paths.database_path().exists():
+        return build_report(config, None, now)
+    with Database.open_readonly(paths.database_path()) as database:
+        return build_report(config, database, now)
+
+
+def _quote_line(row: dict[str, Any]) -> str:
+    if row["price"] is None:
+        return f"  {row['symbol']:<6} {row['state_label']}"
+    change = row["change_text"] or ""
+    line = f"  {row['symbol']:<6} {row['price_text']:>14} {change:>10}  {row['age_text']}"
+    if row["state"] == "held":
+        return f"{line}  retenido\n         {row['reason']}"
+    return f"{line}  {row['state_label']}" if row["state"] == "stale" else line
 
 
 def _status() -> int:
     config = load_config(paths.config_path())
-    provider = CRYPTO_PROVIDER
-    timezone = config.display.timezone
-    now = _now()
-    database = None
-    if paths.database_path().exists():
-        database = Database.open_readonly(paths.database_path())
-    try:
-        calls = database.calls_since(provider.name, now - DAY_SECONDS) if database else 0
-        attempt = database.last_attempt(provider.name) if database else None
-        until = active_cooldown(database, provider, now) if database else None
+    report = _load_report(config, _now())
+    provider = report["providers"][0]
 
-        print(f"{provider.display_name} · {provider.attribution}")
-        print(f"  Llamadas hechas (24 h): {calls} (el proveedor no publica un límite sin clave)")
-        if attempt is None:
-            print("  Último intento: ninguno")
-        else:
-            age = format_age(now - attempt.finished_at)
-            print(f"  Último intento: {age}, {_OUTCOME_LABELS[attempt.outcome]}")
-            if attempt.detail and attempt.outcome != "ok":
-                print(f"  Detalle: {attempt.detail}")
-        if until is not None:
-            print(f"  En pausa por 429 hasta las {format_clock(until, timezone)}")
-        print(f"Cripto ({config.display.currency})")
-        for symbol in config.assets.crypto:
-            print(_quote_line(symbol, database, attempt, config, now))
-    finally:
-        if database:
-            database.close()
+    print(f"{provider['name']} · {provider['attribution']}")
+    print(
+        f"  Llamadas hechas (24 h): {provider['calls_24h']} "
+        "(el proveedor no publica un límite sin clave)"
+    )
+    attempt = provider["last_attempt"]
+    if attempt is None:
+        print("  Último intento: ninguno")
+    else:
+        print(f"  Último intento: {attempt['age_text']}, {attempt['outcome_label']}")
+        if attempt["detail"] and attempt["outcome"] != "ok":
+            print(f"  Detalle: {attempt['detail']}")
+    if provider["cooldown_until_text"]:
+        print(f"  En pausa por 429 hasta las {provider['cooldown_until_text']}")
+    if provider["offline_streak"] >= 2:
+        print(
+            f"  Sin conexión en {provider['offline_streak']} pasadas seguidas; "
+            f"próximo intento automático hacia las {provider['next_attempt_text']}"
+        )
+    crypto = report["groups"][0]
+    print(f"{crypto['title']} ({report['currency']})")
+    for row in crypto["items"]:
+        print(_quote_line(row))
+    print("Índices y acciones: sin proveedor configurado")
     return 0
+
+
+def _show() -> int:
+    config = load_config(paths.config_path())
+    report = _load_report(config, _now())
+    for group in report["groups"]:
+        print(group["title"])
+        for row in group["items"]:
+            if row["price"] is None:
+                print(f"  {row['symbol']:<6} {row['name']:<18} {row['state_label']}")
+                continue
+            line = (
+                f"  {row['symbol']:<6} {row['name']:<18} {format_sparkline(row['series']):<16} "
+                f"{row['price_text']:>14} {row['change_text'] or '':>10}  {row['state_label']}"
+            )
+            print(f"{line}\n         {row['reason']}" if row["state"] == "held" else line)
+    for provider in report["providers"]:
+        print(provider["attribution"])
+    return 0
+
+
+def _json(pretty: bool) -> int:
+    """Siempre imprime un JSON válido: la barra lo necesita aunque algo vaya mal."""
+    now = _now()
+    code = 0
+    try:
+        report = _load_report(load_config(paths.config_path()), now)
+    except (PipelineError, sqlite3.Error, OSError) as error:
+        report = error_report(redact_text(str(error)), now)
+        code = 1
+    print(
+        json.dumps(
+            report,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=2 if pretty else None,
+            separators=None if pretty else (",", ":"),
+        )
+    )
+    return code
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -213,6 +247,9 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     commands.add_parser("status", help="muestra el estado del colector y los datos guardados")
+    commands.add_parser("show", help="muestra los precios y minigráficos en el terminal")
+    json_parser = commands.add_parser("json", help="imprime los datos para la barra y el panel")
+    json_parser.add_argument("--pretty", action="store_true", help="con sangría, para leerlo")
     return parser
 
 
@@ -227,6 +264,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return _fetch(args)
             case "status":
                 return _status()
+            case "show":
+                return _show()
+            case "json":
+                return _json(args.pretty)
     except PipelineError as error:
         print(f"pipeline: {error}", file=sys.stderr)
         return 1

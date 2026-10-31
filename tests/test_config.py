@@ -64,6 +64,7 @@ def test_values_can_be_overridden(tmp_path):
         ({"assets": {"stocks": ["BTC"]}}, "repite"),
         ({"collector": {"crypto_interval_minutes": 1}}, "entre 2"),
         ({"collector": {"max_retries": True}}, "entero"),
+        ({"collector": {"max_offline_interval_minutes": 0}}, "entre 1"),
         ({"collector": {"request_timeout_seconds": "5"}}, "entero"),
         ({"collector": {"eodhd_daily_call_budget": 21}}, "entre 0 y 20"),
         ({"validation": {"max_jump_percent": 0}}, "entre 1"),

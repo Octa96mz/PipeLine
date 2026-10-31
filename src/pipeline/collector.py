@@ -10,6 +10,7 @@ from pipeline.db import Database, Quote
 from pipeline.errors import FetchInProgress, NetworkError, ProviderError, RateLimited
 from pipeline.http import HttpClient
 from pipeline.providers.base import Provider
+from pipeline.schedule import active_cooldown, next_attempt_at
 from pipeline.validate import rejection_reason
 
 LOG_RETENTION_SECONDS = 30 * 86_400
@@ -49,17 +50,6 @@ def make_client(database: Database, provider: Provider, config: Config, now: int
     )
 
 
-def active_cooldown(database: Database, provider: Provider, now: int) -> int | None:
-    until = database.cooldown_until(provider.name)
-    return until if until is not None and until > now else None
-
-
-def _is_due(database: Database, provider: Provider, interval_seconds: int, now: int) -> bool:
-    # Cuenta cualquier intento, no solo los correctos: fallar no acelera el ritmo de llamadas.
-    last = database.last_attempt(provider.name)
-    return last is None or now - last.finished_at >= interval_seconds - DUE_TOLERANCE_SECONDS
-
-
 def run_fetch(
     database: Database,
     provider: Provider,
@@ -74,12 +64,18 @@ def run_fetch(
     database.prune_logs(now - LOG_RETENTION_SECONDS)
 
     # El cooldown se respeta siempre, también en un fetch manual.
-    until = active_cooldown(database, provider, now)
+    until = active_cooldown(database, provider.name, now)
     if until is not None:
         return FetchResult("cooldown", cooldown_until=until)
-    interval = config.collector.crypto_interval_minutes * 60
-    if scheduled and not _is_due(database, provider, interval, now):
-        return FetchResult("not_due")
+    if scheduled:
+        due = next_attempt_at(
+            database,
+            provider.name,
+            config.collector.crypto_interval_minutes * 60,
+            config.collector.max_offline_interval_minutes * 60,
+        )
+        if due is not None and now < due - DUE_TOLERANCE_SECONDS:
+            return FetchResult("not_due")
 
     currency = config.display.currency
     try:
@@ -104,15 +100,17 @@ def run_fetch(
         if item is None:
             problems.append(f"{symbol}: sin dato en la respuesta")
             continue
-        reason = rejection_reason(
+        rejection = rejection_reason(
             item,
             database.quote(symbol),
             currency,
             config.validation.max_jump_percent,
             now,
         )
-        if reason is not None:
-            problems.append(f"{symbol}: {reason}")
+        if rejection is not None:
+            problems.append(f"{symbol}: {rejection.reason}")
+            if rejection.jump_percent is not None:
+                database.hold_quote(symbol, item.price, rejection.jump_percent, now)
             continue
         database.save_snapshot(
             Quote(

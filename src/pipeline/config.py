@@ -38,6 +38,7 @@ class Assets:
 @dataclass(frozen=True)
 class Collector:
     crypto_interval_minutes: int = 5
+    max_offline_interval_minutes: int = 20
     request_timeout_seconds: int = 10
     max_retries: int = 3
     eodhd_daily_call_budget: int = 18
@@ -148,6 +149,14 @@ def _parse_collector(raw: dict[str, Any]) -> Collector:
     return Collector(
         crypto_interval_minutes=_int(
             table, section, "crypto_interval_minutes", defaults.crypto_interval_minutes, 2, 1440
+        ),
+        max_offline_interval_minutes=_int(
+            table,
+            section,
+            "max_offline_interval_minutes",
+            defaults.max_offline_interval_minutes,
+            1,
+            1440,
         ),
         request_timeout_seconds=_int(
             table, section, "request_timeout_seconds", defaults.request_timeout_seconds, 1, 60

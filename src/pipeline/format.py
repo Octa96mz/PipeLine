@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 NBSP = "\u00a0"
 _CURRENCY_SYMBOLS = {"USD": "$", "EUR": "€"}
+_SPARK_BLOCKS = "▁▂▃▄▅▆▇█"
 
 
 def format_number(value: float, decimals: int) -> str:
@@ -43,3 +44,21 @@ def format_age(seconds: int) -> str:
 
 def format_clock(timestamp: int, timezone: str) -> str:
     return datetime.fromtimestamp(timestamp, UTC).astimezone(ZoneInfo(timezone)).strftime("%H:%M")
+
+
+def format_compact(value: float) -> str:
+    """Cifra corta para la barra: sin decimales a partir de 100."""
+    return format_number(value, 0 if abs(value) >= 100 else 2)
+
+
+def format_sparkline(values: list[float], width: int = 16) -> str:
+    if not values:
+        return ""
+    if len(values) > width:
+        step = (len(values) - 1) / (width - 1)
+        values = [values[round(index * step)] for index in range(width)]
+    low, high = min(values), max(values)
+    if high == low:
+        return _SPARK_BLOCKS[len(_SPARK_BLOCKS) // 2] * len(values)
+    scale = (len(_SPARK_BLOCKS) - 1) / (high - low)
+    return "".join(_SPARK_BLOCKS[round((value - low) * scale)] for value in values)

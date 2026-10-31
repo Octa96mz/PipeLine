@@ -1,5 +1,8 @@
+import errno
 import http.client
 import json
+import socket
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -18,6 +21,27 @@ MAX_BACKOFF_SECONDS = 30
 DEFAULT_COOLDOWN_SECONDS = 600
 MIN_COOLDOWN_SECONDS = 60
 MAX_COOLDOWN_SECONDS = 86_400
+
+
+# Errores de conexión tras los que la petición no pudo salir. EPERM y EACCES son los que da un
+# cortafuegos o el kill switch de una VPN.
+_UNSENT_ERRNOS = {
+    errno.ENETUNREACH,
+    errno.ENETDOWN,
+    errno.EHOSTUNREACH,
+    errno.ECONNREFUSED,
+    errno.EPERM,
+    errno.EACCES,
+}
+
+
+def _never_reached_server(reason: object) -> bool:
+    # El tiempo agotado aquí es de conexión o TLS: urllib solo envuelve en URLError lo que falla
+    # antes de esperar la respuesta. Lo que no se reconoce se cuenta: para no pasarse de una
+    # cuota, es mejor contar de más que de menos.
+    if isinstance(reason, socket.gaierror | ssl.SSLError | TimeoutError):
+        return True
+    return isinstance(reason, OSError) and reason.errno in _UNSENT_ERRNOS
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -88,16 +112,23 @@ class HttpClient:
                 "User-Agent": f"pipeline-market-bar/{__version__}",
             },
         )
-        # Se anota antes de enviar: una petición que falla también puede haber contado.
-        self._on_request()
+        # Solo se cuentan las peticiones que pudieron llegar al servidor, también las de una
+        # respuesta perdida: el proveedor pudo haberlas anotado en la cuota.
         try:
             with self._opener.open(request, timeout=self._timeout) as response:
                 body = response.read(MAX_RESPONSE_BYTES + 1)
         except urllib.error.HTTPError as error:
+            self._on_request()
             with error:
                 self._raise_for_status(error)
-        except (urllib.error.URLError, http.client.HTTPException, OSError) as error:
+        except urllib.error.URLError as error:
+            if not _never_reached_server(error.reason):
+                self._on_request()
             raise NetworkError(redact_text(f"Sin conexión: {error}")) from None
+        except (http.client.HTTPException, OSError) as error:
+            self._on_request()
+            raise NetworkError(redact_text(f"Sin conexión: {error}")) from None
+        self._on_request()
 
         if len(body) > MAX_RESPONSE_BYTES:
             raise ProviderError("Respuesta demasiado grande")

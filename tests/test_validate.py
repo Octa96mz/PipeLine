@@ -17,7 +17,8 @@ def previous(price=100.0, currency="USD", fetched_at=NOW - 300):
 
 
 def reason(quote, reference=None, currency="USD"):
-    return rejection_reason(quote, reference, currency, max_jump_percent=50, now=NOW)
+    rejection = rejection_reason(quote, reference, currency, max_jump_percent=50, now=NOW)
+    return rejection.reason if rejection else None
 
 
 def test_valid_quote_passes():
@@ -54,6 +55,16 @@ def test_future_timestamp_is_rejected_beyond_clock_skew():
 @pytest.mark.parametrize("price", [151.0, 49.0, 100_000.0])
 def test_absurd_jump_is_rejected(price):
     assert "salto" in reason(new(price=price), previous(price=100.0))
+
+
+def test_jump_rejection_reports_its_size():
+    rejection = rejection_reason(new(price=300.0), previous(), "USD", 50, NOW)
+    assert rejection.jump_percent == 200.0
+
+
+def test_other_rejections_are_not_reported_as_jumps():
+    rejection = rejection_reason(new(price=-1.0), previous(), "USD", 50, NOW)
+    assert rejection.jump_percent is None
 
 
 @pytest.mark.parametrize("price", [150.0, 50.0])

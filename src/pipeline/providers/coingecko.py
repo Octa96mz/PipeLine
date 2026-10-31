@@ -1,11 +1,14 @@
 import math
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
 from pipeline.errors import ProviderError
-from pipeline.http import HttpClient
 from pipeline.providers.base import ProviderQuote
+
+# Solo para anotaciones: los lectores importan este módulo y no deben cargar código de red.
+if TYPE_CHECKING:
+    from pipeline.http import HttpClient
 
 BASE_URL = "https://api.coingecko.com/api/v3/coins/markets"
 SPARKLINE_SPAN_SECONDS = 7 * 86_400

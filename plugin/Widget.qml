@@ -11,7 +11,7 @@ BarWidget {
   id: root
   moduleName: "pipeline.market"
 
-  // El tema de Omarchy no define un verde: es la misma paleta que usa wifi-publica.
+  // Paleta fija de verde y rojo, ya que el tema de Omarchy no define un verde.
   readonly property color colorUp: "#9ece6a"
   readonly property color colorDown: "#f7768e"
   readonly property color colorHeld: "#e0af68"

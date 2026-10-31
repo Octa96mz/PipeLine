@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    container: archlinux:base
+    timeout-minutes: 15
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm --needed git python nodejs jq diffutils shellcheck
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Arch es rolling: si cambia de versión, este paso avisa de que hay que revisar los requisitos.
+      - name: Check the Python version
+        run: python -c 'import sys; print(sys.version); sys.exit(sys.version_info[:2] != (3, 14))'
+
+      # install.sh rechaza root y varios tests dependen de permisos de fichero.
+      - name: Create an unprivileged user and the virtual environment
+        run: |
+          useradd -m ci
+          chown -R ci: "$GITHUB_WORKSPACE"
+          su ci -c "cd '$GITHUB_WORKSPACE' && python -m venv .venv && .venv/bin/pip install -r requirements-dev.lock && .venv/bin/pip install -e ."
+
+      - name: Ruff
+        run: su ci -c "cd '$GITHUB_WORKSPACE' && .venv/bin/ruff check . && .venv/bin/ruff format --check ."
+
+      - name: ShellCheck
+        run: su ci -c "cd '$GITHUB_WORKSPACE' && shellcheck -x -S warning install.sh uninstall.sh scripts/common.sh"
+
+      # Un test omitido hace fallar esta ejecución: incluye los de plugin/Model.js si falta Node.js.
+      - name: Pytest
+        run: su ci -c "cd '$GITHUB_WORKSPACE' && PIPELINE_FAIL_ON_SKIP=1 .venv/bin/pytest"

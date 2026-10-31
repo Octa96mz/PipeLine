@@ -1,4 +1,6 @@
+# shellcheck shell=sh disable=SC2034
 # Funciones compartidas por install.sh y uninstall.sh. Se carga con `.`, no se ejecuta.
+# SC2034: las variables de aquí las usan los scripts que cargan este fichero.
 
 PLUGIN_ID="pipeline.market"
 PLUGIN_FILES="manifest.json Widget.qml Model.js MarketPanel.qml Sparkline.qml"

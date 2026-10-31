@@ -1,6 +1,9 @@
+import os
 import socket
 
 import pytest
+
+_skipped = []
 
 
 @pytest.fixture(autouse=True)
@@ -21,3 +24,15 @@ def no_network(monkeypatch):
 
     monkeypatch.setattr(socket.socket, "connect", blocked)
     monkeypatch.setattr(socket, "create_connection", blocked)
+
+
+def pytest_runtest_logreport(report):
+    if report.skipped:
+        _skipped.append(report.nodeid)
+
+
+def pytest_sessionfinish(session):
+    # En CI, un test omitido es un fallo: si no, faltar Node.js dejaría sin probar plugin/Model.js.
+    if os.environ.get("PIPELINE_FAIL_ON_SKIP") and _skipped:
+        print(f"\nTests omitidos con PIPELINE_FAIL_ON_SKIP: {len(_skipped)}")
+        session.exitstatus = 1

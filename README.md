@@ -201,6 +201,8 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 - `install.sh` and `uninstall.sh` were tested only in a temporary `HOME` with simulated `systemctl`
   and `omarchy`, on an Arch-based system with `bash` as `/bin/sh`.
+- The CI steps were run in a local `archlinux:base` container, except `actions/checkout`. The workflow
+  has not yet run on GitHub.
 - Python is tested only with 3.14, which is why `requires-python` is `>=3.14`.
 - Development dependencies are pinned to exact versions, but `requirements-dev.lock` has no hashes,
   so downloaded packages are not checked against known digests.
@@ -226,8 +228,6 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 - Providers for indices and stocks.
 - `wifi-publica portal` should stop the timer and start it again afterwards, or this project should
   document that step.
-- Continuous integration, which must install Node.js and fail if the `plugin/Model.js` tests are
-  skipped. They are skipped locally when Node.js is missing.
 - Screenshots of the panel, using synthetic data only.
 
 ## Development
@@ -240,7 +240,10 @@ python3 -m venv .venv
 .venv/bin/ruff check .
 ```
 
-Tests use only synthetic data and block network access.
+Tests use only synthetic data and block network access. The `plugin/Model.js` tests are skipped when
+Node.js is missing, but CI fails on any skipped test by setting `PIPELINE_FAIL_ON_SKIP=1`.
+
+CI runs in an `archlinux:base` container, with the checks above and ShellCheck.
 
 ## License
 

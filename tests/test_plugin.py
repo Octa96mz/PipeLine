@@ -277,3 +277,282 @@ def test_empty_capability_set_keeps_a_directive_that_lets_the_service_start():
         "ProtectControlGroups",
     )
     assert any(unit_values("pipeline-fetch.service", name) for name in enabling)
+
+
+def report_with(tmp_path, *rows, status="fresh"):
+    return {
+        "schema_version": 1,
+        "status": status,
+        "bar": {"items": [], "tooltip": ""},
+        "groups": [
+            {"title": "Cripto", "series_label": "7 d", "change_label": "24 h", "items": list(rows)},
+            {
+                "title": "Índices",
+                "series_label": None,
+                "change_label": None,
+                "items": [
+                    {
+                        "name": "S&P 500",
+                        "state": "unavailable",
+                        "reason": "Sin proveedor configurado",
+                    },
+                    {
+                        "name": "IBEX 35",
+                        "state": "unavailable",
+                        "reason": "Sin proveedor configurado",
+                    },
+                ],
+            },
+        ],
+        "providers": [
+            {
+                "attribution": "Powered by CoinGecko",
+                "calls_24h": 3,
+                "last_attempt": {"age_text": "hace 1 min", "outcome_label": "correcto"},
+                "cooldown_until_text": None,
+                "offline_streak": 0,
+                "next_attempt_text": None,
+            }
+        ],
+    }
+
+
+def row(**overrides):
+    values = {
+        "symbol": "BTC",
+        "name": "Bitcoin",
+        "state": "fresh",
+        "state_label": "hace 1 min",
+        "reason": None,
+        "price": 1000.0,
+        "price_text": "1000,00 $",
+        "change_text": "+1,50 %",
+        "direction": "up",
+        "age_text": "hace 1 min",
+        "series": [1.0, 2.0],
+    }
+    return {**values, **overrides}
+
+
+def fresh(tmp_path, *rows, status="fresh"):
+    return {"report": report_with(tmp_path, *rows, status=status), "failed": False, "message": ""}
+
+
+@needs_node
+def test_panel_row_has_every_requested_field(tmp_path):
+    group = model("panelGroups", fresh(tmp_path, row()))[0]
+    assert (group["title"], group["seriesLabel"], group["changeLabel"]) == ("Cripto", "7 d", "24 h")
+    assert group["rows"][0] == {
+        "symbol": "BTC",
+        "name": "Bitcoin",
+        "priceText": "1000,00 $",
+        "changeText": "+1,50 %",
+        "role": "up",
+        "stateText": "hace 1 min",
+        "note": "",
+        "series": [1.0, 2.0],
+    }
+
+
+@needs_node
+def test_group_without_provider_collapses_to_one_line(tmp_path):
+    group = model("panelGroups", fresh(tmp_path, row()))[1]
+    assert group["rows"] == []
+    assert group["summary"] == "S&P 500, IBEX 35 · sin proveedor configurado"
+    assert group["seriesLabel"] == ""
+
+
+@needs_node
+@pytest.mark.parametrize(
+    ("state", "direction", "role", "text"),
+    [
+        ("stale", "up", "stale", "obsoleto · hace 1 min"),
+        ("held", "up", "held", "retenido · hace 1 min"),
+    ],
+)
+def test_data_age_stays_visible_when_not_fresh(tmp_path, state, direction, role, text):
+    item = row(state=state, direction=direction, reason="Motivo")
+    panel_row = model("panelGroups", fresh(tmp_path, item, status="stale"))[0]["rows"][0]
+    assert panel_row["role"] == role
+    assert panel_row["stateText"] == text
+
+
+@needs_node
+def test_only_held_rows_carry_their_reason(tmp_path):
+    held = row(state="held", reason="Retenido: salto del 200 %")
+    stale = row(symbol="ETH", state="stale", reason="Sin conexión")
+    rows = model("panelGroups", fresh(tmp_path, held, stale, status="stale"))[0]["rows"]
+    assert rows[0]["note"] == "Retenido: salto del 200 %"
+    assert rows[1]["note"] == ""
+
+
+@needs_node
+def test_row_without_price_shows_a_dash(tmp_path):
+    item = row(
+        state="no_data",
+        state_label="sin datos",
+        reason="Más de 24 h sin refresco",
+        price=None,
+        price_text=None,
+        change_text=None,
+        direction=None,
+        age_text=None,
+        series=[],
+    )
+    panel_row = model("panelGroups", fresh(tmp_path, item, status="no_data"))[0]["rows"][0]
+    assert panel_row["priceText"] == "—"
+    assert panel_row["changeText"] == "—"
+    assert panel_row["role"] == "none"
+    assert panel_row["stateText"] == "sin datos"
+
+
+@needs_node
+def test_failed_read_shows_saved_rows_as_stale(tmp_path):
+    result = {"report": report_with(tmp_path, row()), "failed": True, "message": "sin respuesta"}
+    panel_row = model("panelGroups", result)[0]["rows"][0]
+    assert panel_row["role"] == "stale"
+    assert panel_row["stateText"] == "obsoleto · hace 1 min"
+    assert model("banner", result) == "No se pudo actualizar: sin respuesta"
+
+
+@needs_node
+def test_banner_explains_stale_data_without_repeating_reasons(tmp_path):
+    rows = [
+        row(state="stale", reason="Sin conexión"),
+        row(symbol="ETH", state="stale", reason="Sin conexión"),
+        row(symbol="XRP", state="held", reason="Retenido"),
+    ]
+    assert (
+        model("banner", fresh(tmp_path, *rows, status="stale")) == "Datos obsoletos: Sin conexión"
+    )
+
+
+@needs_node
+def test_banner_is_empty_for_fresh_data_and_explains_missing_data(tmp_path):
+    assert model("banner", fresh(tmp_path, row())) == ""
+    assert model("banner", fresh(tmp_path, status="no_data")) == "Todavía no hay datos."
+    assert model("banner", None) == "Cargando…"
+
+
+@needs_node
+def test_footer_has_attribution_calls_and_last_attempt(tmp_path):
+    lines = model("footerLines", fresh(tmp_path, row()))
+    assert lines == [
+        "Powered by CoinGecko · llamadas (24 h): 3 · último intento hace 1 min, correcto"
+    ]
+
+
+@needs_node
+def test_footer_reports_pause_and_backoff(tmp_path):
+    result = fresh(tmp_path, row())
+    result["report"]["providers"][0].update(
+        cooldown_until_text="15:00", offline_streak=3, next_attempt_text="15:10"
+    )
+    lines = model("footerLines", result)
+    assert "En pausa por el proveedor hasta las 15:00" in lines
+    assert "Sin conexión en 3 pasadas seguidas; próximo intento hacia las 15:10" in lines
+
+
+@needs_node
+def test_refresh_button_states(tmp_path):
+    result = fresh(tmp_path, row())
+    assert model("refreshState", result, "idle") == {
+        "enabled": True,
+        "label": "Actualizar",
+        "note": "",
+    }
+    requested = model("refreshState", result, "requested")
+    assert requested["enabled"] is False
+    assert "solo llama" in requested["note"]
+    failed = model("refreshState", result, "failed")
+    assert failed["enabled"] is True
+    assert "timer" in failed["note"]
+
+
+@needs_node
+def test_refresh_button_is_disabled_during_a_pause(tmp_path):
+    result = fresh(tmp_path, row())
+    result["report"]["providers"][0]["cooldown_until_text"] = "15:00"
+    state = model("refreshState", result, "idle")
+    assert state["enabled"] is False
+    assert "15:00" in state["label"]
+
+
+@needs_node
+def test_sparkline_points_fill_the_area_with_high_values_on_top():
+    points = model("sparklinePoints", [1.0, 3.0, 2.0], 102, 22, 1)
+    assert points == [{"x": 1, "y": 21}, {"x": 51, "y": 1}, {"x": 101, "y": 11}]
+
+
+@needs_node
+def test_flat_sparkline_is_a_centred_line():
+    points = model("sparklinePoints", [5.0, 5.0], 12, 12, 1)
+    assert [point["y"] for point in points] == [6, 6]
+
+
+@needs_node
+@pytest.mark.parametrize("values", [[], [1.0], None])
+def test_sparkline_needs_two_points(values):
+    assert model("sparklinePoints", values, 100, 20, 1) == []
+
+
+@needs_node
+def test_panel_reads_a_real_report(tmp_path):
+    report = real_report(tmp_path)
+    result = model("parseReport", json.dumps(report), None)
+    groups = model("panelGroups", result)
+    assert [group["title"] for group in groups] == ["Cripto", "Índices", "Acciones"]
+    assert groups[0]["seriesLabel"] == "7 d"
+    assert groups[0]["changeLabel"] == "24 h"
+    assert len(groups[0]["rows"]) == 4
+    assert groups[1]["rows"] == []
+    assert "S&P 500" in groups[1]["summary"]
+    assert model("footerLines", result)[0].startswith("Powered by CoinGecko")
+
+
+def test_panel_files_never_contact_a_provider():
+    for name in ("Widget.qml", "MarketPanel.qml", "Sparkline.qml", "Model.js"):
+        source = (PLUGIN / name).read_text(encoding="utf-8")
+        for forbidden in ("https://", "http://", "XMLHttpRequest", "curl", "bash"):
+            assert forbidden not in source, (name, forbidden)
+
+
+def test_refresh_only_starts_the_collector_service():
+    source = (PLUGIN / "Widget.qml").read_text(encoding="utf-8")
+    assert (
+        'command: ["systemctl", "--user", "start", "--no-block", "pipeline-fetch.service"]'
+        in source
+    )
+    assert '"fetch"' not in source
+
+
+def test_sparkline_has_no_variation_colours():
+    source = (PLUGIN / "Sparkline.qml").read_text(encoding="utf-8")
+    assert "#9ece6a" not in source
+    assert "#f7768e" not in source
+    panel = (PLUGIN / "MarketPanel.qml").read_text(encoding="utf-8")
+    assert "lineColor: panel.textColor" in panel
+
+
+@needs_node
+@pytest.mark.parametrize(
+    "report",
+    [
+        {"schema_version": 1, "status": "fresh"},
+        {"schema_version": 1, "status": "fresh", "bar": {"items": []}, "providers": []},
+        {
+            "schema_version": 1,
+            "status": "fresh",
+            "bar": {"items": []},
+            "providers": [],
+            "groups": [{"title": "Sin items"}],
+        },
+    ],
+)
+def test_same_version_with_missing_fields_keeps_the_previous_report(report):
+    previous = {"schema_version": 1, "bar": {"items": [], "tooltip": "Anterior"}, "groups": []}
+    result = model("parseReport", json.dumps(report), previous)
+    assert result["failed"] is True
+    assert result["message"] == "datos incompletos"
+    assert result["report"] == previous
+    assert model("panelGroups", result) == []

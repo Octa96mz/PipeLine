@@ -3,9 +3,8 @@
 Read-only market prices and sparklines for the Omarchy top bar.
 
 **Status: early development.** Crypto prices can be fetched and inspected from the command line.
-Indices and stocks have no data provider yet and are reported as `unavailable`. The bar element
-exists but its panel is a placeholder, and installation instructions will be added once it is
-finished.
+Indices and stocks have no data provider yet and are reported as `unavailable`. Installation
+instructions will be added with `install.sh`.
 
 This project is not financial advice and is not affiliated with any data provider.
 
@@ -65,6 +64,14 @@ avoid it, stop the timer first with `systemctl --user stop pipeline-fetch.timer`
 a held price is marked with `!`. It only runs `pipeline json`, asynchronously and with a 3-second
 timeout, and it never contacts a data provider.
 
+Clicking it opens a panel with each row's name, symbol, data age, sparkline, price and variation
+pill. The sparkline uses a neutral colour because it covers a different period from the pill: for
+crypto, 7 days and 24 hours respectively. Each group labels both periods.
+
+The panel's "Actualizar" button never contacts a provider itself. It runs `systemctl --user start`
+on the collector service, which calls only if its interval has passed and respects any 429 pause and
+backoff, so pressing it often has no effect on the calls made.
+
 By default it runs `~/.local/bin/pipeline`, a launcher created by `scripts/install-launcher.sh`. A
 `command` setting on its entry in `shell.json` overrides that, and `refreshSeconds` (default 60,
 minimum 15) sets how often it reads.
@@ -102,8 +109,9 @@ python3 -m venv .venv
 - Request counting relies on how Python's `urllib` reports failures. It was tested without network
   access, by simulating failures at the connection and response stages.
 - The service's sandbox and scheduling were tested in transient units with an isolated network,
-  including no network, 429 pauses and backoff. A real HTTPS request from inside the sandbox has not
-  been tested.
+  including no network, 429 pauses and backoff. A real VPN kill switch has not been tested: its
+  effect was only simulated, with the errors it would produce.
+- Behaviour on a shared VPN address that receives HTTP 429 has not been observed.
 - `AF_NETLINK` stays allowed in the service because it could not be shown to be unnecessary for name
   resolution without making real requests.
 - The plugin uses `qs.Ui` and `KeyboardPanel` from the Omarchy shell. They load correctly from
@@ -116,10 +124,15 @@ python3 -m venv .venv
   green. They have not been checked against every theme.
 - Sparkline timestamps are approximate: the API returns seven days of prices with no times.
 
-## Planned for continuous integration
+## Planned
 
+- `wifi-publica portal` should stop the timer and start it again afterwards, or this project should
+  document that step.
+- `install.sh` must create `~/.local/share/pipeline` and the launcher.
 - CI must install Node.js and fail if the `plugin/Model.js` tests are skipped. They are skipped
   locally when Node.js is missing, which would otherwise hide a failure in CI.
+- README screenshots must use synthetic data and show only the panel, cropped so that no real bar or
+  path appears.
 
 ## License
 

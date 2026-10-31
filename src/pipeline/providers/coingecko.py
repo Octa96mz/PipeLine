@@ -53,6 +53,8 @@ class CoinGecko:
     name = "coingecko"
     display_name = "CoinGecko"
     attribution = "Powered by CoinGecko"
+    series_label = "7 d"
+    change_label = "24 h"
     asset_class = "crypto"
     price_kind = "live"
     # Sus términos piden refrescar la caché al menos cada 24 horas.

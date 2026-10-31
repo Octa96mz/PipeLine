@@ -213,6 +213,7 @@ def _bar(
     status: str,
     providers: list[dict[str, Any]],
     now: int,
+    change_label: str,
 ) -> dict[str, Any]:
     items = []
     for symbol in config.display.bar_items:
@@ -235,6 +236,7 @@ def _bar(
     else:
         clock = format_clock(updated_at, config.display.timezone)
         lines = [f"Última actualización: {clock} ({format_age(max(0, now - updated_at))})"]
+        lines.append(f"Variación: {change_label}")
     if status == "stale":
         reasons = {row["reason"] for row in rows.values() if row["stale"]}
         lines.append("Datos obsoletos: " + "; ".join(sorted(reasons)))
@@ -263,11 +265,29 @@ def build_report(config: Config, database: Database | None, now: int) -> dict[st
         "error": None,
         "currency": config.display.currency,
         "timezone": config.display.timezone,
-        "bar": _bar(config, rows, status, providers, now),
+        "bar": _bar(config, rows, status, providers, now, provider.change_label),
         "groups": [
-            {"id": "crypto", "title": "Cripto", "items": crypto},
-            {"id": "indices", "title": "Índices", "items": indices},
-            {"id": "stocks", "title": "Acciones", "items": stocks},
+            {
+                "id": "crypto",
+                "title": "Cripto",
+                "series_label": provider.series_label,
+                "change_label": provider.change_label,
+                "items": crypto,
+            },
+            {
+                "id": "indices",
+                "title": "Índices",
+                "series_label": None,
+                "change_label": None,
+                "items": indices,
+            },
+            {
+                "id": "stocks",
+                "title": "Acciones",
+                "series_label": None,
+                "change_label": None,
+                "items": stocks,
+            },
         ],
         "providers": providers,
     }

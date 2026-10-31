@@ -19,6 +19,9 @@ class Provider(Protocol):
     name: str
     display_name: str
     attribution: str
+    # Períodos que cubren el minigráfico y la variación, para rotularlos.
+    series_label: str
+    change_label: str
     asset_class: str
     price_kind: str
     # Tiempo máximo sin refresco antes de dejar de mostrar y conservar el dato.

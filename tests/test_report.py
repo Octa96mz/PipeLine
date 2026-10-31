@@ -394,3 +394,18 @@ def test_readers_never_load_network_code(command, tmp_path):
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_groups_label_their_periods(opener, clock, capsys):
+    fetch(opener, markets())
+    groups = read_json(capsys)["groups"]
+    assert (groups[0]["series_label"], groups[0]["change_label"]) == ("7 d", "24 h")
+    assert (groups[1]["series_label"], groups[1]["change_label"]) == (None, None)
+    assert (groups[2]["series_label"], groups[2]["change_label"]) == (None, None)
+
+
+def test_tooltip_and_show_name_the_periods(opener, clock, capsys):
+    fetch(opener, markets())
+    assert "Variación: 24 h" in read_json(capsys)["bar"]["tooltip"]
+    assert cli.main(["show"]) == 0
+    assert "Cripto (gráfico 7 d, variación 24 h)" in capsys.readouterr().out

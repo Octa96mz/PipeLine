@@ -21,6 +21,7 @@ BarWidget {
   readonly property int refreshSeconds: Math.max(15, parseInt(setting("refreshSeconds", 60), 10) || 60)
 
   property var result: null
+  property string refreshPhase: "idle"
   readonly property var items: Model.barItems(result)
 
   property bool panelOpen: false
@@ -56,6 +57,11 @@ BarWidget {
     if (!reader.running) reader.running = true
   }
 
+  // El botón solo arranca el servicio del colector, que decide si toca llamar a la API.
+  function requestCollection() {
+    if (!collector.running) collector.running = true
+  }
+
   function roleColor(role) {
     if (role === "up") return colorUp
     if (role === "down") return colorDown
@@ -77,6 +83,25 @@ BarWidget {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.result = Model.parseReport(text, root.result ? root.result.report : null)
+    }
+  }
+
+  Process {
+    id: collector
+    command: ["systemctl", "--user", "start", "--no-block", "pipeline-fetch.service"]
+    onExited: function(exitCode) {
+      root.refreshPhase = exitCode === 0 ? "requested" : "failed"
+      if (exitCode === 0) afterCollection.restart()
+    }
+  }
+
+  // Da tiempo a que termine el colector y vuelve a leer lo que haya guardado.
+  Timer {
+    id: afterCollection
+    interval: 4000
+    onTriggered: {
+      root.refreshPhase = "idle"
+      root.refresh()
     }
   }
 
@@ -150,24 +175,18 @@ BarWidget {
     onClicked: function(mouse) { root.triggerPress(mouse.button) }
   }
 
-  // Provisional: la lista con minigráficos llega en H6.
-  KeyboardPanel {
-    id: panel
+  MarketPanel {
     anchorItem: root
     owner: root
     bar: root.bar
     open: root.panelOpen
-    contentWidth: panel.fittedContentWidth(Style.space(320))
-    contentHeight: panel.fittedContentHeight(message.implicitHeight)
-
-    Text {
-      id: message
-      width: parent.width
-      text: Model.tooltip(root.result)
-      color: Commons.Color.popups.text
-      font.family: Style.font.family
-      font.pixelSize: Style.font.body
-      wrapMode: Text.WordWrap
-    }
+    result: root.result
+    refreshPhase: root.refreshPhase
+    colorUp: root.colorUp
+    colorDown: root.colorDown
+    colorHeld: root.colorHeld
+    onCloseRequested: root.close()
+    onSwitchRequested: function(direction) { if (root.bar) root.bar.switchPanelFrom(root, direction) }
+    onRefreshRequested: root.requestCollection()
   }
 }

@@ -193,7 +193,10 @@ def _show() -> int:
     config = load_config(paths.config_path())
     report = _load_report(config, _now())
     for group in report["groups"]:
-        print(group["title"])
+        periods = ""
+        if group["series_label"]:
+            periods = f" (gráfico {group['series_label']}, variación {group['change_label']})"
+        print(f"{group['title']}{periods}")
         for row in group["items"]:
             if row["price"] is None:
                 print(f"  {row['symbol']:<6} {row['name']:<18} {row['state_label']}")

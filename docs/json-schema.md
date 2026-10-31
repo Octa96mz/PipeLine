@@ -17,11 +17,14 @@ with an invalid configuration or a damaged database, so the bar can always parse
 | `currency` | string or null | Configured currency |
 | `timezone` | string or null | Configured time zone |
 | `bar` | object | Data for the compact bar element |
-| `groups` | array | `crypto`, `indices` and `stocks`, each with `id`, `title` and `items` |
+| `groups` | array | `crypto`, `indices` and `stocks`, each with `id`, `title`, `series_label`, `change_label` and `items` |
 | `providers` | array | Provider status, attribution and call counts |
 
 `status` ignores `unavailable` rows: indices and stocks without a provider do not make the report
 stale.
+
+`series_label` and `change_label` name the periods of the sparkline and of the variation, such as
+`7 d` and `24 h`. They are `null` for a group without a provider.
 
 ## Rows in `groups[].items`
 

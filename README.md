@@ -183,8 +183,8 @@ the last valid price is more than 24 hours old. Raise `max_jump_percent` to hold
 
 - **Delayed or incorrect data from the provider.** Validation only catches obvious errors.
 - **The provider sees your IP address**, and the times of your requests, every 5 minutes. If you use
-  a VPN kill switch with a captive portal mode that opens DNS and ports 80 and 443, such as
-  `wifi-publica portal`, a timer run could leave outside the tunnel. To avoid it, run
+  a VPN with a restricted network mode that opens DNS, HTTP and HTTPS, for example to get past a
+  captive portal, a timer run could leave outside the tunnel. To avoid it, run
   `systemctl --user stop pipeline-fetch.timer` first.
 - **Other processes running as your user** can read the database and any stored key. File permissions
   only protect against other users.
@@ -236,8 +236,8 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 ## Planned
 
 - Providers for indices and stocks.
-- `wifi-publica portal` should stop the timer and start it again afterwards, or this project should
-  document that step.
+- A way to stop the timer automatically during a restricted network mode that opens DNS, HTTP and
+  HTTPS. For now this is a manual step, described in the threat model.
 
 ## Development
 

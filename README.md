@@ -3,8 +3,9 @@
 Read-only market prices and sparklines for the Omarchy top bar.
 
 **Status: early development.** Crypto prices can be fetched and inspected from the command line.
-Indices and stocks have no data provider yet and are reported as `unavailable`. The bar widget is
-not implemented yet, and installation instructions will be added once it is.
+Indices and stocks have no data provider yet and are reported as `unavailable`. The bar element
+exists but its panel is a placeholder, and installation instructions will be added once it is
+finished.
 
 This project is not financial advice and is not affiliated with any data provider.
 
@@ -43,6 +44,27 @@ pipeline show              # prices and sparklines in the terminal
 pipeline json              # data for the bar; see docs/json-schema.md
 ```
 
+## Bar element
+
+`plugin/` is an Omarchy shell plugin (`pipeline.market`) that shows one to three prices from
+`display.bar_items`, coloured by their variation. Stale data is shown dimmed, never green or red, and
+a held price is marked with `!`. It only runs `pipeline json`, asynchronously and with a 3-second
+timeout, and it never contacts a data provider.
+
+By default it runs `~/.local/bin/pipeline`, a launcher created by `scripts/install-launcher.sh`. A
+`command` setting on its entry in `shell.json` overrides that, and `refreshSeconds` (default 60,
+minimum 15) sets how often it reads.
+
+After installing or updating the plugin, restart the shell so it loads the new code:
+
+```sh
+omarchy restart shell
+```
+
+`omarchy-shell shell rescanPlugins` finds the plugin but was not enough to load changed code.
+
+Tested with Omarchy 4.0.6, Hyprland 0.57.0 and Quickshell 0.3.2.
+
 ## Development
 
 ```sh
@@ -65,7 +87,20 @@ python3 -m venv .venv
   from CoinGecko has not been observed.
 - Request counting relies on how Python's `urllib` reports failures. It was tested without network
   access, by simulating failures at the connection and response stages.
+- The plugin uses `qs.Ui` and `KeyboardPanel` from the Omarchy shell. They load correctly from
+  `~/.config` on the tested versions, but are not documented as a stable API for third parties, so an
+  Omarchy update could break the plugin. The shell logs `Module path ... is outside of the config
+  folder` for it; on the tested versions this had no visible effect.
+- QML is linted with `qmllint`, which cannot resolve the shell's `qs.*` modules outside the shell, so
+  it checks syntax but not those types. The widget's logic in `plugin/Model.js` is tested with Node.
+- The green and red of the bar element are fixed colours, because the Omarchy theme does not define a
+  green. They have not been checked against every theme.
 - Sparkline timestamps are approximate: the API returns seven days of prices with no times.
+
+## Planned for continuous integration
+
+- CI must install Node.js and fail if the `plugin/Model.js` tests are skipped. They are skipped
+  locally when Node.js is missing, which would otherwise hide a failure in CI.
 
 ## License
 

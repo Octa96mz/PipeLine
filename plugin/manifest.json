@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "pipeline.market",
+  "name": "PipeLine",
+  "version": "0.1.0",
+  "author": "Octa96mz",
+  "description": "Market prices and sparklines in the bar",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "PipeLine",
+    "description": "Market prices and sparklines in the bar",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

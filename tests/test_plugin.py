@@ -161,6 +161,7 @@ def test_repository_has_no_personal_paths():
         REPOSITORY / name
         for name in (
             "README.md",
+            "SECURITY.md",
             "config.example.toml",
             "pyproject.toml",
             "install.sh",
@@ -491,3 +492,20 @@ def test_same_version_with_missing_fields_keeps_the_previous_report(report):
     assert result["message"] == "datos incompletos"
     assert result["report"] == previous
     assert model("panelGroups", result) == []
+
+
+def test_public_documents_keep_the_required_notices():
+    readme = (REPOSITORY / "README.md").read_text(encoding="utf-8")
+    for required in (
+        "not financial advice",
+        "not affiliated",
+        "Powered by [CoinGecko]",
+        "## Threat model",
+        "## Not yet validated",
+        "python3 -m venv .venv",
+        "omarchy restart shell",
+    ):
+        assert required in readme, required
+    security = (REPOSITORY / "SECURITY.md").read_text(encoding="utf-8")
+    assert "Report a vulnerability" in security
+    assert "@" not in security

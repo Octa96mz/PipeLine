@@ -171,7 +171,23 @@ def test_repository_has_no_personal_paths():
     for path in files:
         if path.suffix == ".pyc":
             continue
-        assert "/home/" not in path.read_text(encoding="utf-8"), path
+        # En bytes: también cubre las capturas, sus metadatos incluidos.
+        assert b"/home/" not in path.read_bytes(), path
+
+
+def test_screenshots_contain_no_metadata_or_paths():
+    for path in (REPOSITORY / "docs/screenshots").glob("*.png"):
+        content = path.read_bytes()
+        assert content.startswith(b"\x89PNG\r\n\x1a\n")
+        position, chunks = 8, set()
+        while position < len(content):
+            length = int.from_bytes(content[position : position + 4])
+            chunks.add(content[position + 4 : position + 8])
+            position += 12 + length
+        # Solo imagen y densidad de píxeles: sin texto, fecha ni datos de origen.
+        assert chunks <= {b"IHDR", b"IDAT", b"IEND", b"pHYs"}, path
+        for forbidden in (b"/home/", b"/tmp/", b".config"):
+            assert forbidden not in content, path
 
 
 def unit_values(name, key):

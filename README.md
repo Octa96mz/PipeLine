@@ -11,6 +11,16 @@ other data provider, or Omarchy. Prices can be delayed or wrong: do not base dec
 
 Crypto prices are **Powered by [CoinGecko](https://www.coingecko.com)**.
 
+## Screenshots
+
+![Panel with rows of made-up prices, sparklines and variation pills](docs/screenshots/panel.png)
+
+![Panel showing stale rows and a held price](docs/screenshots/panel-stale.png)
+
+Synthetic data. Each image is a reproduction with a neutral theme, not a capture of the real shell:
+`scripts/make_screenshots.py` draws the real panel code outside the shell, without network access
+and without capturing the screen.
+
 ## Status
 
 | Data | State |
@@ -228,7 +238,6 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 - Providers for indices and stocks.
 - `wifi-publica portal` should stop the timer and start it again afterwards, or this project should
   document that step.
-- Screenshots of the panel, using synthetic data only.
 
 ## Development
 

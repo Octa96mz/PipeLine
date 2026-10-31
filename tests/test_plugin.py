@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from pipeline import __version__
+from pipeline.collector import DUE_TOLERANCE_SECONDS
 from pipeline.config import Config
 from pipeline.db import Database
 from pipeline.report import SCHEMA_VERSION, build_report, error_report
@@ -228,10 +229,51 @@ def test_launcher_refuses_unsafe_paths(tmp_path):
 
 
 def test_repository_has_no_personal_paths():
-    checked = [REPOSITORY / name for name in ("src", "plugin", "scripts", "docs")]
+    checked = [REPOSITORY / name for name in ("src", "plugin", "scripts", "docs", "systemd")]
     files = [path for folder in checked for path in folder.rglob("*") if path.is_file()]
     files += [REPOSITORY / name for name in ("README.md", "config.example.toml", "pyproject.toml")]
     for path in files:
         if path.suffix == ".pyc":
             continue
         assert "/home/" not in path.read_text(encoding="utf-8"), path
+
+
+def unit_values(name, key):
+    lines = (REPOSITORY / "systemd" / name).read_text(encoding="utf-8").splitlines()
+    return [line.split("=", 1)[1] for line in lines if line.startswith(f"{key}=")]
+
+
+def test_service_runs_only_the_scheduled_fetch_through_the_launcher():
+    assert unit_values("pipeline-fetch.service", "Type") == ["oneshot"]
+    assert unit_values("pipeline-fetch.service", "ExecStart") == [
+        "%h/.local/bin/pipeline fetch --scheduled"
+    ]
+
+
+def test_service_can_only_write_its_data_directory():
+    assert unit_values("pipeline-fetch.service", "ProtectSystem") == ["strict"]
+    assert unit_values("pipeline-fetch.service", "ProtectHome") == ["read-only"]
+    assert unit_values("pipeline-fetch.service", "ReadWritePaths") == ["%h/.local/share/pipeline"]
+
+
+def test_timer_runs_every_five_minutes_within_the_collector_tolerance():
+    assert unit_values("pipeline-fetch.timer", "OnCalendar") == ["*:0/5"]
+    delay = int(unit_values("pipeline-fetch.timer", "RandomizedDelaySec")[0].removesuffix("s"))
+    accuracy = int(unit_values("pipeline-fetch.timer", "AccuracySec")[0].removesuffix("s"))
+    assert delay + accuracy < DUE_TOLERANCE_SECONDS
+
+
+def test_empty_capability_set_keeps_a_directive_that_lets_the_service_start():
+    # Sin ninguna de estas, CapabilityBoundingSet= impide arrancar un servicio de usuario.
+    assert unit_values("pipeline-fetch.service", "CapabilityBoundingSet") == [""]
+    enabling = (
+        "ProtectSystem",
+        "ProtectHome",
+        "ReadWritePaths",
+        "PrivateTmp",
+        "PrivateDevices",
+        "ProtectKernelTunables",
+        "ProtectKernelLogs",
+        "ProtectControlGroups",
+    )
+    assert any(unit_values("pipeline-fetch.service", name) for name in enabling)

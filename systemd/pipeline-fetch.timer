@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the PipeLine market data collector every 5 minutes
+
+[Timer]
+OnCalendar=*:0/5
+# El retraso evita que todos los equipos llamen justo en el minuto exacto. El colector admite
+# un margen de 30 s respecto a su intervalo, y estos dos valores suman menos.
+RandomizedDelaySec=20s
+AccuracySec=5s
+# Tras suspender o apagar, recupera una pasada perdida en lugar de esperar a la siguiente.
+Persistent=yes
+
+[Install]
+WantedBy=timers.target

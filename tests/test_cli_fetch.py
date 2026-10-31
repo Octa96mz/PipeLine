@@ -7,6 +7,7 @@ import urllib.request
 import pytest
 
 from pipeline import cli, paths
+from pipeline.collector import fetch_lock
 from pipeline.db import Database
 from pipeline.format import NBSP
 from synthetic import NOW, FakeOpener, http_error, markets
@@ -227,3 +228,84 @@ def test_invalid_config_is_reported(clock, capsys):
     paths.config_path().write_text('[display]\ncurrency = "GBP"\n', encoding="utf-8")
     assert cli.main(["status"]) == 1
     assert "currency" in capsys.readouterr().err
+
+
+UNREACHABLE = urllib.error.URLError(OSError(101, "Network is unreachable"))
+
+
+def scheduled(opener, *responses):
+    opener.responses.extend(responses)
+    return cli.main(["fetch", "--scheduled"])
+
+
+def attempts_made():
+    connection = sqlite3.connect(paths.database_path())
+    count = connection.execute("SELECT COUNT(*) FROM fetch_attempts").fetchone()[0]
+    connection.close()
+    return count
+
+
+def test_scheduled_fetch_with_network_down_succeeds_and_spends_nothing(opener, clock, capsys):
+    assert scheduled(opener, *[UNREACHABLE] * 4) == 0
+    captured = capsys.readouterr()
+    assert "sin conexión" in captured.out
+    assert captured.err == ""
+    assert calls_made() == 0
+    assert attempts_made() == 1
+
+
+def test_scheduled_fetch_respects_the_cooldown_after_a_429(opener, clock, capsys):
+    assert scheduled(opener, http_error(429, {"Retry-After": "900"})) == 0
+    assert calls_made() == 1
+    for minutes in (5, 10, 14):
+        clock["now"] = NOW + minutes * 60
+        assert cli.main(["fetch", "--scheduled"]) == 0
+    assert len(opener.requests) == 1
+    assert calls_made() == 1
+    assert attempts_made() == 1
+
+    clock["now"] = NOW + 900
+    assert scheduled(opener, markets(updated=clock["now"])) == 0
+    assert len(opener.requests) == 2
+    assert calls_made() == 2
+
+
+def test_scheduled_fetch_backs_off_to_20_minutes_when_offline(opener, clock):
+    # Minuto de cada pasada que debe intentarlo: la espera crece hasta el tope de 20 minutos.
+    expected = [0, 5, 15, 35, 55, 75]
+    made = []
+    for minute in range(0, 80, 5):
+        clock["now"] = NOW + minute * 60
+        before = attempts_made() if paths.database_path().exists() else 0
+        opener.responses[:] = [UNREACHABLE] * 4
+        assert cli.main(["fetch", "--scheduled"]) == 0
+        if attempts_made() > before:
+            made.append(minute)
+    assert made == expected
+    assert calls_made() == 0
+
+
+def test_scheduled_fetch_returns_to_normal_after_recovering(opener, clock):
+    for minute in (0, 5, 15, 35):
+        clock["now"] = NOW + minute * 60
+        assert scheduled(opener, *[UNREACHABLE] * 4) == 0
+    opener.responses.clear()
+    clock["now"] = NOW + 55 * 60
+    assert scheduled(opener, markets(updated=clock["now"])) == 0
+    opener.responses.clear()
+    clock["now"] = NOW + 60 * 60
+    assert scheduled(opener, markets(updated=clock["now"])) == 0
+    assert calls_made() == 2
+
+
+def test_scheduled_fetch_is_not_a_failure_during_a_manual_fetch(opener, clock, capsys):
+    with fetch_lock(paths.data_dir() / "fetch.lock"):
+        assert cli.main(["fetch", "--scheduled"]) == 0
+    assert "otro fetch en curso" in capsys.readouterr().out
+    assert opener.requests == []
+
+
+def test_manual_fetch_reports_a_fetch_already_running(opener, clock, capsys):
+    with fetch_lock(paths.data_dir() / "fetch.lock"):
+        assert cli.main(["fetch", "--yes"]) == 1
+    assert "otro fetch en curso" in capsys.readouterr().err

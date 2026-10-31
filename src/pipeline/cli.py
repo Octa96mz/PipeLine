@@ -11,7 +11,7 @@ from typing import Any
 from pipeline import __version__, keystore, paths
 from pipeline.config import Config, load_config
 from pipeline.db import Database
-from pipeline.errors import PipelineError
+from pipeline.errors import FetchInProgress, PipelineError
 from pipeline.format import format_clock, format_sparkline
 from pipeline.providers import CRYPTO_PROVIDER
 from pipeline.redact import redact_text, setup_logging
@@ -268,6 +268,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return _show()
             case "json":
                 return _json(args.pretty)
+    except FetchInProgress as error:
+        # Coincidir con un fetch manual no es un fallo: la siguiente pasada del timer ya actuará.
+        if args.scheduled:
+            print(f"pipeline: {error}")
+            return 0
+        print(f"pipeline: {error}", file=sys.stderr)
+        return 1
     except PipelineError as error:
         print(f"pipeline: {error}", file=sys.stderr)
         return 1

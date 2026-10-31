@@ -44,6 +44,20 @@ pipeline show              # prices and sparklines in the terminal
 pipeline json              # data for the bar; see docs/json-schema.md
 ```
 
+## Scheduled collection
+
+`systemd/` has a user timer that runs `pipeline fetch --scheduled` every 5 minutes. The service only
+calls the provider when its interval has passed, and it respects any 429 pause and the backoff after
+network failures. Having no network is not a service failure: the data just goes stale.
+
+The units depend on the launcher `~/.local/bin/pipeline`. `~/.local/share/pipeline` must exist before
+the service starts, and the future `install.sh` must create it. The timer runs only while your user
+session is active.
+
+If you use a VPN kill switch with a captive portal mode that opens DNS and ports 80 and 443, such as
+`wifi-publica portal`, a timer run during that time could reach CoinGecko outside the tunnel. To
+avoid it, stop the timer first with `systemctl --user stop pipeline-fetch.timer`.
+
 ## Bar element
 
 `plugin/` is an Omarchy shell plugin (`pipeline.market`) that shows one to three prices from
@@ -87,6 +101,11 @@ python3 -m venv .venv
   from CoinGecko has not been observed.
 - Request counting relies on how Python's `urllib` reports failures. It was tested without network
   access, by simulating failures at the connection and response stages.
+- The service's sandbox and scheduling were tested in transient units with an isolated network,
+  including no network, 429 pauses and backoff. A real HTTPS request from inside the sandbox has not
+  been tested.
+- `AF_NETLINK` stays allowed in the service because it could not be shown to be unnecessary for name
+  resolution without making real requests.
 - The plugin uses `qs.Ui` and `KeyboardPanel` from the Omarchy shell. They load correctly from
   `~/.config` on the tested versions, but are not documented as a stable API for third parties, so an
   Omarchy update could break the plugin. The shell logs `Module path ... is outside of the config

@@ -1,0 +1,34 @@
+[Unit]
+Description=PipeLine market data collector
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/pipeline fetch --scheduled
+# Peor caso de la configuración: 6 intentos de 60 s más las esperas entre ellos.
+TimeoutStartSec=600
+Nice=10
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+# Debe existir antes de arrancar: si falta, el servicio falla sin ejecutar nada.
+ReadWritePaths=%h/.local/share/pipeline
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+# Vacía: el proceso no conserva ninguna capacidad. En un servicio de usuario no arranca sin otra
+# directiva de sandbox. Probado en systemd 262: basta una cualquiera de ProtectSystem, ProtectHome,
+# ReadWritePaths, PrivateTmp, PrivateDevices, ProtectKernelTunables, ProtectKernelLogs o
+# ProtectControlGroups. Si se quitan todas esas, esta línea impide arrancar el servicio.
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM

@@ -11,7 +11,7 @@ from pipeline.redact import redact_text
 
 ASSET_CLASSES = ("crypto", "index", "stock")
 PRICE_KINDS = ("live", "close")
-OUTCOMES = ("ok", "partial", "error")
+OUTCOMES = ("ok", "partial", "rate_limited", "offline", "error")
 
 # Se ejecutan en orden. Una base de datos existente aplica solo las que le faltan.
 _MIGRATIONS = (
@@ -50,6 +50,27 @@ _MIGRATIONS = (
         detail      TEXT
     ) STRICT;
     CREATE INDEX fetch_attempts_provider_time ON fetch_attempts (provider, finished_at);
+    """,
+    # SQLite no permite cambiar un CHECK: hay que reconstruir la tabla.
+    """
+    CREATE TABLE fetch_attempts_new (
+        id          INTEGER PRIMARY KEY,
+        provider    TEXT NOT NULL,
+        finished_at INTEGER NOT NULL,
+        outcome     TEXT NOT NULL
+                    CHECK (outcome IN ('ok', 'partial', 'rate_limited', 'offline', 'error')),
+        detail      TEXT
+    ) STRICT;
+    INSERT INTO fetch_attempts_new SELECT id, provider, finished_at, outcome, detail
+        FROM fetch_attempts;
+    DROP TABLE fetch_attempts;
+    ALTER TABLE fetch_attempts_new RENAME TO fetch_attempts;
+    CREATE INDEX fetch_attempts_provider_time ON fetch_attempts (provider, finished_at);
+
+    CREATE TABLE provider_state (
+        provider       TEXT PRIMARY KEY,
+        cooldown_until INTEGER NOT NULL
+    ) STRICT;
     """,
 )
 
@@ -107,9 +128,13 @@ class Database:
                 f"{path.absolute().as_uri()}?mode=ro", timeout=1, uri=True, autocommit=True
             )
             database = cls(connection)
-            if database.schema_version() > len(_MIGRATIONS):
+            version = database.schema_version()
+            if version > len(_MIGRATIONS):
                 connection.close()
                 raise DatabaseError(f"{path}: creada por una versión más reciente de PipeLine")
+            if version < len(_MIGRATIONS):
+                connection.close()
+                raise DatabaseError(f"{path}: pendiente de actualizar; se hará en el próximo fetch")
         except sqlite3.Error as error:
             raise DatabaseError(f"{path}: no se pudo abrir: {error}") from error
         return database
@@ -230,6 +255,33 @@ class Database:
             "VALUES (?, ?, ?, ?)",
             (provider, finished_at, outcome, safe_detail),
         )
+
+    def set_cooldown(self, provider: str, until: int) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO provider_state (provider, cooldown_until) VALUES (?, ?)
+            ON CONFLICT (provider) DO UPDATE SET cooldown_until = excluded.cooldown_until
+            """,
+            (provider, until),
+        )
+
+    def cooldown_until(self, provider: str) -> int | None:
+        row = self._connection.execute(
+            "SELECT cooldown_until FROM provider_state WHERE provider = ?", (provider,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def delete_quotes_older_than(self, provider: str, cutoff: int) -> int:
+        """Borra los datos no refrescados desde `cutoff`, junto con sus series."""
+        cursor = self._connection.execute(
+            "DELETE FROM quotes WHERE provider = ? AND fetched_at < ?", (provider, cutoff)
+        )
+        return cursor.rowcount
+
+    def prune_logs(self, cutoff: int) -> None:
+        with self._transaction():
+            self._connection.execute("DELETE FROM api_calls WHERE called_at < ?", (cutoff,))
+            self._connection.execute("DELETE FROM fetch_attempts WHERE finished_at < ?", (cutoff,))
 
     def last_attempt(self, provider: str) -> FetchAttempt | None:
         row = self._connection.execute(

@@ -8,7 +8,8 @@ from pathlib import Path
 
 from pipeline.errors import KeystoreError
 
-PROVIDERS = ("coingecko", "eodhd")
+# CoinGecko se usa sin clave: aquí solo están los proveedores que la leen.
+PROVIDERS = ("eodhd",)
 
 # Limitar el alfabeto evita tener que escapar el valor al escribir el TOML.
 _KEY_FORMAT = re.compile(r"^[A-Za-z0-9._~+/=-]{8,512}$")

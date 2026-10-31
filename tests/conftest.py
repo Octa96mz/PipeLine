@@ -10,7 +10,6 @@ def isolated_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.delenv("PIPELINE_EODHD_API_KEY", raising=False)
-    monkeypatch.delenv("PIPELINE_COINGECKO_API_KEY", raising=False)
 
 
 @pytest.fixture(autouse=True)

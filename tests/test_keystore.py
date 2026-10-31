@@ -26,11 +26,12 @@ def test_no_temporary_files_remain(path):
     assert [item.name for item in path.parent.iterdir()] == ["secrets.toml"]
 
 
-def test_saving_one_provider_preserves_the_other(path):
+def test_saving_one_provider_preserves_the_other(path, monkeypatch):
+    monkeypatch.setattr(keystore, "PROVIDERS", ("eodhd", "other"))
     keystore.save_key("eodhd", KEY, path)
-    keystore.save_key("coingecko", "synthetic-key-value-2", path)
+    keystore.save_key("other", "synthetic-key-value-2", path)
     assert keystore.load_key("eodhd", path) == KEY
-    assert keystore.load_key("coingecko", path) == "synthetic-key-value-2"
+    assert keystore.load_key("other", path) == "synthetic-key-value-2"
 
 
 def test_saving_replaces_the_previous_key(path):

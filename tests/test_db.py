@@ -42,7 +42,7 @@ def test_migrations_run_once(path):
     with Database.open(path) as first:
         version = first.schema_version()
         first.save_snapshot(make_quote(), [])
-    assert version == 1
+    assert version == 2
     with Database.open(path) as second:
         assert second.schema_version() == version
         assert second.quote("BTC") == make_quote()
@@ -156,7 +156,52 @@ def test_readonly_handles_paths_with_special_characters(tmp_path):
     path = tmp_path / "dir with spaces?#" / "pipeline.db"
     Database.open(path).close()
     with Database.open_readonly(path) as reader:
-        assert reader.schema_version() == 1
+        assert reader.schema_version() == 2
+
+
+def test_upgrade_from_v1_keeps_attempts_and_allows_new_outcomes(path, monkeypatch):
+    from pipeline import db
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "_MIGRATIONS", db._MIGRATIONS[:1])
+        with Database.open(path) as old:
+            old.record_attempt("synthetic", 10, "error", "old")
+            with pytest.raises(sqlite3.IntegrityError):
+                old.record_attempt("synthetic", 11, "offline")
+    with Database.open(path) as upgraded:
+        assert upgraded.schema_version() == 2
+        assert upgraded.last_attempt("synthetic").detail == "old"
+        upgraded.record_attempt("synthetic", 12, "offline")
+        upgraded.record_attempt("synthetic", 13, "rate_limited")
+        assert upgraded.last_attempt("synthetic").outcome == "rate_limited"
+
+
+def test_readonly_refuses_a_database_pending_migration(path, monkeypatch):
+    from pipeline import db
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "_MIGRATIONS", db._MIGRATIONS[:1])
+        Database.open(path).close()
+    with pytest.raises(DatabaseError, match="pendiente"):
+        Database.open_readonly(path)
+
+
+def test_cooldown_round_trip(database):
+    assert database.cooldown_until("synthetic") is None
+    database.set_cooldown("synthetic", 100)
+    database.set_cooldown("synthetic", 200)
+    assert database.cooldown_until("synthetic") == 200
+
+
+def test_deleting_old_quotes_removes_their_series_and_spares_others(database):
+    database.save_snapshot(make_quote(symbol="OLD", fetched_at=100), [(1, 10.0)])
+    database.save_snapshot(make_quote(symbol="NEW", fetched_at=200), [(1, 10.0)])
+    database.save_snapshot(make_quote(symbol="OTHER", provider="p2", fetched_at=100), [])
+    assert database.delete_quotes_older_than("synthetic", 150) == 1
+    assert database.quote("OLD") is None
+    assert database.series("OLD") == []
+    assert database.quote("NEW") is not None
+    assert database.quote("OTHER") is not None
 
 
 def test_corrupt_file_is_reported(path):

@@ -1,0 +1,22 @@
+# Copiar a ~/.config/pipeline/config.toml. Este ejemplo recoge los valores por defecto.
+# Las claves de API no van aquí: usá `pipeline set-key <proveedor>`.
+
+[display]
+currency = "USD"                # "USD" o "EUR"
+timezone = "Europe/Madrid"
+bar_items = ["BTC", "SPX"]      # entre 1 y 3 símbolos de [assets]
+
+[assets]
+crypto = ["BTC", "ETH", "XRP", "NEAR"]
+indices = ["SPX", "DJI", "IXIC", "IBEX"]
+stocks = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
+
+[collector]
+crypto_interval_minutes = 5
+request_timeout_seconds = 10
+max_retries = 3
+eodhd_daily_call_budget = 18    # tope propio; el plan gratuito de EODHD admite 20 al día
+
+[validation]
+max_jump_percent = 50           # un salto mayor respecto al último dato se descarta
+stale_after_minutes = 30        # a partir de aquí, un dato en vivo se muestra como obsoleto
